@@ -1,0 +1,28 @@
+# Cache static assets for 1 year
+/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Cache service worker for 1 day
+/service-worker.js
+  Cache-Control: public, max-age=86400
+
+# Set CORS headers for model files
+/models/*
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, POST, OPTIONS
+  Access-Control-Allow-Headers: Content-Type
+
+# Set proper MIME types for ONNX models
+/models/*.onnx
+  Content-Type: application/octet-stream
+
+# Set proper MIME types for WASM files
+/onnx/*.wasm
+  Content-Type: application/wasm
+
+# Enable PWA features
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  X-XSS-Protection: 1; mode=block
+  Referrer-Policy: strict-origin-when-cross-origin
