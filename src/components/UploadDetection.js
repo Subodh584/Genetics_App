@@ -62,6 +62,8 @@ const DetectionCanvas = styled.canvas`
   left: 0;
   pointer-events: none;
   border-radius: 8px;
+  width: 100%;
+  height: 100%;
 `;
 
 const ImageInfo = styled.div`
@@ -140,6 +142,38 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
     initDetector();
   }, [setIsModelLoaded, setModelError]);
 
+  // Handle window resize to maintain proper canvas scaling for uploaded images
+  useEffect(() => {
+    const handleResize = () => {
+      // Redraw all detection canvases after a resize
+      uploadedImages.forEach((image, index) => {
+        const imageElements = document.querySelectorAll('.uploaded-image');
+        const canvasElements = document.querySelectorAll('.detection-canvas');
+        
+        if (imageElements[index] && canvasElements[index]) {
+          const imgElement = imageElements[index];
+          const canvas = canvasElements[index];
+          
+          setTimeout(() => {
+            const imgRect = imgElement.getBoundingClientRect();
+            canvas.width = imgRect.width;
+            canvas.height = imgRect.height;
+            drawDetections(image, canvas);
+          }, 100);
+        }
+      });
+    };
+
+    const debounceResize = setTimeout(handleResize, 100);
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(debounceResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedImages, showDetections]);
+
   const onDrop = useCallback(async (acceptedFiles) => {
     if (!isModelLoaded) {
       setError('AI model is not loaded yet. Please wait...');
@@ -201,8 +235,21 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
       return;
     }
 
-    const scaleX = canvas.width / canvas.previousElementSibling.naturalWidth;
-    const scaleY = canvas.height / canvas.previousElementSibling.naturalHeight;
+    const imgElement = canvas.previousElementSibling;
+    if (!imgElement) return;
+
+    // Get the actual displayed dimensions of the image element
+    const imgRect = imgElement.getBoundingClientRect();
+    const displayedWidth = imgRect.width;
+    const displayedHeight = imgRect.height;
+
+    // Set canvas size to match the displayed image size
+    canvas.width = displayedWidth;
+    canvas.height = displayedHeight;
+
+    // Calculate scale factors between original image and displayed image
+    const scaleX = displayedWidth / imgElement.naturalWidth;
+    const scaleY = displayedHeight / imgElement.naturalHeight;
 
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -211,14 +258,15 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
       const { bbox, confidence, class_name, color } = detection;
       const [x, y, width, height] = bbox;
 
-      // Scale coordinates to canvas size
+      // Scale coordinates to displayed image size
       const scaledX = x * scaleX;
       const scaledY = y * scaleY;
       const scaledWidth = width * scaleX;
       const scaledHeight = height * scaleY;
 
       // Draw bounding box
-      ctx.strokeStyle = '#00ff00';
+      const borderColor = color?.displayColor || '#00ff00';
+      ctx.strokeStyle = borderColor;
       ctx.lineWidth = 2;
       ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
 
@@ -228,19 +276,25 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
         labelText = `${color.emoji} ${color.name} (${(confidence * 100).toFixed(1)}%)`;
       }
 
-      // Calculate label dimensions
-      ctx.font = '12px Arial';
+      // Calculate label dimensions with responsive font size
+      const fontSize = Math.max(10, Math.min(14, displayedWidth / 40)); // Responsive font size
+      ctx.font = `${fontSize}px Arial`;
       const textMetrics = ctx.measureText(labelText);
       const labelWidth = Math.max(textMetrics.width + 8, scaledWidth);
-      const labelHeight = 20;
+      const labelHeight = fontSize + 8;
+
+      // Ensure label stays within canvas bounds
+      const labelX = Math.min(scaledX, canvas.width - labelWidth);
+      const labelY = Math.max(labelHeight, scaledY);
 
       // Draw background for label
-      ctx.fillStyle = '#00ff00';
-      ctx.fillRect(scaledX, scaledY - labelHeight, labelWidth, labelHeight);
+      ctx.fillStyle = borderColor;
+      ctx.fillRect(labelX, labelY - labelHeight, labelWidth, labelHeight);
 
       // Draw label text
       ctx.fillStyle = '#000000';
-      ctx.fillText(labelText, scaledX + 4, scaledY - 6);
+      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.fillText(labelText, labelX + 4, labelY - 4);
     });
   };
 
@@ -269,15 +323,16 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
       // Draw the original image
       ctx.drawImage(img, 0, 0);
 
-      // Draw detections if enabled
+      // Draw detections if enabled - use original image coordinates
       if (showDetections && image.detections) {
         image.detections.forEach((detection) => {
           const { bbox, confidence, class_name, color } = detection;
           const [x, y, width, height] = bbox;
 
-          // Draw bounding box
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 3;
+          // Draw bounding box at original resolution
+          const borderColor = color?.displayColor || '#00ff00';
+          ctx.strokeStyle = borderColor;
+          ctx.lineWidth = 4; // Slightly thicker for high-res image
           ctx.strokeRect(x, y, width, height);
 
           // Create label with color information
@@ -286,19 +341,25 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
             labelText = `${color.emoji} ${color.name} (${(confidence * 100).toFixed(1)}%)`;
           }
 
-          // Calculate label dimensions
-          ctx.font = '16px Arial';
+          // Calculate label dimensions at original resolution
+          const fontSize = Math.max(16, img.width / 50); // Scale font with image size
+          ctx.font = `${fontSize}px Arial`;
           const textMetrics = ctx.measureText(labelText);
           const labelWidth = Math.max(textMetrics.width + 10, width);
-          const labelHeight = 25;
+          const labelHeight = fontSize + 10;
+
+          // Ensure label stays within image bounds
+          const labelX = Math.min(x, img.width - labelWidth);
+          const labelY = Math.max(labelHeight, y);
 
           // Draw background for label
-          ctx.fillStyle = '#00ff00';
-          ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
+          ctx.fillStyle = borderColor;
+          ctx.fillRect(labelX, labelY - labelHeight, labelWidth, labelHeight);
 
           // Draw label text
           ctx.fillStyle = '#000000';
-          ctx.fillText(labelText, x + 5, y - 5);
+          ctx.font = `bold ${fontSize}px Arial`;
+          ctx.fillText(labelText, labelX + 5, labelY - 5);
         });
       }
 
@@ -466,22 +527,26 @@ const UploadDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
               <ImageCard key={image.id}>
                 <ImageContainer>
                   <UploadedImage
+                    className="uploaded-image"
                     src={image.src}
                     alt={image.name}
                     onLoad={(e) => {
-                      // Set up canvas for detections
+                      // Set up canvas for detections with proper sizing
                       const canvas = e.target.nextElementSibling;
                       if (canvas) {
-                        canvas.width = e.target.offsetWidth;
-                        canvas.height = e.target.offsetHeight;
-                        drawDetections(image, canvas);
+                        // Use a small delay to ensure the image is fully rendered
+                        setTimeout(() => {
+                          const imgRect = e.target.getBoundingClientRect();
+                          canvas.width = imgRect.width;
+                          canvas.height = imgRect.height;
+                          drawDetections(image, canvas);
+                        }, 100);
                       }
                     }}
                   />
                   <DetectionCanvas
+                    className="detection-canvas"
                     style={{
-                      width: '100%',
-                      height: '200px',
                       display: showDetections ? 'block' : 'none'
                     }}
                   />

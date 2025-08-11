@@ -38,6 +38,8 @@ const DetectionCanvas = styled.canvas`
   pointer-events: none;
   z-index: 10;
   border-radius: inherit;
+  width: 100%;
+  height: 100%;
 `;
 
 const StatsPanel = styled(Card)`
@@ -348,6 +350,28 @@ const CameraDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
     initDetector();
   }, [setIsModelLoaded, setModelError]);
 
+  // Handle window resize to maintain proper canvas scaling
+  useEffect(() => {
+    const handleResize = () => {
+      if (canvasRef.current && webcamRef.current?.video) {
+        const video = webcamRef.current.video;
+        const canvas = canvasRef.current;
+        const videoRect = video.getBoundingClientRect();
+        
+        // Update canvas size to match displayed video size
+        canvas.width = videoRect.width;
+        canvas.height = videoRect.height;
+        
+        // Clear and redraw if we have current detections
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const videoConstraints = {
     width: 640,
     height: 480,
@@ -373,26 +397,53 @@ const CameraDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
     }
     
     const ctx = canvas.getContext('2d');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
     
-    console.log('🎨 Canvas dimensions set to:', canvas.width, 'x', canvas.height);
+    // Get the actual displayed dimensions of the video element
+    const videoRect = video.getBoundingClientRect();
+    const displayedWidth = videoRect.width;
+    const displayedHeight = videoRect.height;
+    
+    // Set canvas size to match the displayed video size
+    canvas.width = displayedWidth;
+    canvas.height = displayedHeight;
+    
+    console.log('🎨 Canvas dimensions set to displayed size:', canvas.width, 'x', canvas.height);
+    console.log('🎨 Video actual dimensions:', video.videoWidth, 'x', video.videoHeight);
+    
+    // Calculate scale factors between actual video and displayed video
+    const scaleX = displayedWidth / video.videoWidth;
+    const scaleY = displayedHeight / video.videoHeight;
+    
+    console.log('🎨 Scale factors:', { scaleX, scaleY });
     
     // Clear previous drawings
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw detections
+    // Draw detections with proper scaling
     detections.forEach((detection, index) => {
       const { bbox, confidence, class_name, color } = detection;
       const [x, y, width, height] = bbox;
       
-      console.log(`🎨 Drawing detection ${index}:`, { x, y, width, height, confidence, class_name, color: color?.type, method: color?.method });
+      // Scale the coordinates to match the displayed video size
+      const scaledX = x * scaleX;
+      const scaledY = y * scaleY;
+      const scaledWidth = width * scaleX;
+      const scaledHeight = height * scaleY;
+      
+      console.log(`🎨 Drawing detection ${index}:`, { 
+        original: { x, y, width, height }, 
+        scaled: { scaledX, scaledY, scaledWidth, scaledHeight },
+        confidence, 
+        class_name, 
+        color: color?.type, 
+        method: color?.method 
+      });
       
       // Draw bounding box with color-coded border
       const borderColor = color?.displayColor || '#00ff00';
       ctx.strokeStyle = borderColor;
       ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, width, height);
+      ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
       
       // Create label text with color info
       const colorEmoji = color?.emoji || '';
@@ -401,27 +452,32 @@ const CameraDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
       const labelText = `${colorEmoji} ${class_name} ${(confidence * 100).toFixed(1)}%`;
       const colorText = color ? `${colorName} (${color.confidence}%)${methodTag}` : '';
       
-      // Calculate label dimensions
-      ctx.font = '14px Arial';
+      // Calculate label dimensions with responsive font size
+      const fontSize = Math.max(12, Math.min(16, displayedWidth / 40)); // Responsive font size
+      ctx.font = `${fontSize}px Arial`;
       const labelWidth = Math.max(
         ctx.measureText(labelText).width, 
         ctx.measureText(colorText).width
       ) + 10;
-      const labelHeight = colorText ? 50 : 25;
+      const labelHeight = colorText ? fontSize * 3.5 : fontSize * 2;
+      
+      // Ensure label stays within canvas bounds
+      const labelX = Math.min(scaledX, canvas.width - labelWidth);
+      const labelY = Math.max(labelHeight, scaledY);
       
       // Draw background for label
       ctx.fillStyle = borderColor;
-      ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
+      ctx.fillRect(labelX, labelY - labelHeight, labelWidth, labelHeight);
       
       // Draw main label text
       ctx.fillStyle = '#000000';
-      ctx.font = 'bold 14px Arial';
-      ctx.fillText(labelText, x + 5, y - labelHeight + 18);
+      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.fillText(labelText, labelX + 5, labelY - labelHeight + fontSize + 3);
       
       // Draw color information if available
       if (colorText) {
-        ctx.font = '12px Arial';
-        ctx.fillText(colorText, x + 5, y - labelHeight + 35);
+        ctx.font = `${fontSize - 2}px Arial`;
+        ctx.fillText(colorText, labelX + 5, labelY - labelHeight + (fontSize * 2) + 6);
       }
     });
     
@@ -531,22 +587,40 @@ const CameraDetection = ({ isModelLoaded, setIsModelLoaded, setModelError }) => 
   const captureImage = useCallback(() => {
     const imageSrc = webcamRef.current.getScreenshot();
     const canvas = canvasRef.current;
+    const video = webcamRef.current?.video;
     
-    if (imageSrc && canvas) {
+    if (imageSrc && canvas && video) {
       // Create a new canvas to combine video and detections
       const combinedCanvas = document.createElement('canvas');
       const combinedCtx = combinedCanvas.getContext('2d');
       
       const img = new Image();
       img.onload = () => {
-        combinedCanvas.width = img.width;
-        combinedCanvas.height = img.height;
+        // Set combined canvas to the actual video dimensions
+        combinedCanvas.width = video.videoWidth;
+        combinedCanvas.height = video.videoHeight;
         
-        // Draw the captured image
-        combinedCtx.drawImage(img, 0, 0);
+        // Draw the captured image at full resolution
+        combinedCtx.drawImage(img, 0, 0, video.videoWidth, video.videoHeight);
         
-        // Draw the detection overlay
-        combinedCtx.drawImage(canvas, 0, 0);
+        // Get the current canvas context and scale the detection overlay
+        const detectionCanvas = document.createElement('canvas');
+        const detectionCtx = detectionCanvas.getContext('2d');
+        detectionCanvas.width = video.videoWidth;
+        detectionCanvas.height = video.videoHeight;
+        
+        // Scale the detection overlay from displayed size to actual video size
+        const displayedWidth = canvas.width;
+        const displayedHeight = canvas.height;
+        const scaleX = video.videoWidth / displayedWidth;
+        const scaleY = video.videoHeight / displayedHeight;
+        
+        // Draw the detection overlay scaled to match the actual video dimensions
+        detectionCtx.scale(scaleX, scaleY);
+        detectionCtx.drawImage(canvas, 0, 0);
+        
+        // Combine the image and scaled detections
+        combinedCtx.drawImage(detectionCanvas, 0, 0);
         
         // Convert to data URL and save
         const combinedImageSrc = combinedCanvas.toDataURL('image/jpeg');
