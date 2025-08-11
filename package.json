@@ -1,4 +1,4 @@
-{
+{ "homepage": "https://Subodh584.github.io/Genetics_App",
   "name": "genetics-app",
   "version": "1.0.0",
   "description": "Genetics App - PWA for real-time test tube detection",
@@ -20,6 +20,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "predeploy":"npm run build",
+    "deploy":"gh-pages -d build",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
